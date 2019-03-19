@@ -25,8 +25,19 @@ public class JMSBusinessService extends SiebelBusinessService {
     private Consumer<String, String> consumer;
     private Producer<String, String> producer;
 
+    private static final Logger LOGGER = Logger.getLogger(JMSBusinessService.class.getName());
+
     public void doInvokeMethod(String method, SiebelPropertySet inputs, SiebelPropertySet outputs) throws SiebelBusinessServiceException {
 
+        try {
+            FileHandler fileHandler  = new FileHandler("C:/Temp/MSG.log");
+            LOGGER.addHandler(fileHandler);
+            fileHandler.setFormatter(new SimpleFormatter());
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        LOGGER.info("method = " + method);
 
         if (method.equals("Subscribe")) {
             if (this.consumer == null) {
@@ -46,6 +57,7 @@ public class JMSBusinessService extends SiebelBusinessService {
                             msg.setProperty("Key", record.key());
                             outputs.addChild(msg);
                         }
+                        outputs.setType("XMLHierarchy");
                         break;
                     }
                 } catch (Exception e) {
@@ -78,7 +90,7 @@ public class JMSBusinessService extends SiebelBusinessService {
             producer.flush();
             producer.close();
         } else if (method.equals("Commit")) {
-            //this.consumer.commitSync();
+            this.consumer.commitAsync();
         } else if (method.equals("Rollback")) {
             throw new SiebelBusinessServiceException("ROLLBACK", "Error on processing records on Siebel side!");
         } else if (method.equals("CloseConnection")) {}
@@ -121,12 +133,12 @@ public class JMSBusinessService extends SiebelBusinessService {
         if (topic == null || topic.isEmpty()) {
             throw new SiebelBusinessServiceException("MISSING_PARAMETER", "Missing parameter \"Topic\"");
         }
-        props.put(ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG, 102400);
+        //props.put(ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG, 102400);
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,  btServers);
         props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
-        //props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
 
         final Consumer<String, String> consumer = new KafkaConsumer<>(props);
         consumer.subscribe(Collections.singletonList(topic));
