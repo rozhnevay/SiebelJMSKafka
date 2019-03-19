@@ -47,9 +47,7 @@ public class JMSBusinessService extends SiebelBusinessService {
         LOGGER.info("method = " + method);
 
         if (method.equals("Subscribe")) {
-            //if (this.consumer == null) {
-                this.consumer = createConsumer(inputs);
-            //}
+            this.consumer = createConsumer(inputs);
 
             while (true) {
                 try {
@@ -58,13 +56,6 @@ public class JMSBusinessService extends SiebelBusinessService {
                     if (consumerRecords.count() > 0) {
                         JSONArray ja = new JSONArray();
                         for(ConsumerRecord<String,String> record:consumerRecords){
-                            /*SiebelPropertySet msg = new SiebelPropertySet();
-                            msg.setValue(record.value());
-                            msg.setProperty("Topic", record.topic());
-                            msg.setProperty("Partition", String.valueOf(record.partition()));
-                            msg.setProperty("Offset", String.valueOf(record.offset()));
-                            msg.setProperty("Key", record.key());
-                            outputs.addChild(msg);*/
                             LinkedHashMap rec = new LinkedHashMap(2);
                             rec.put("value", record.value());
                             rec.put("topic", record.topic());
