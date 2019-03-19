@@ -6,6 +6,7 @@ import com.siebel.eai.SiebelBusinessServiceException;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Properties;
 import java.util.concurrent.ExecutionException;
 import java.util.logging.FileHandler;
@@ -19,6 +20,7 @@ import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.producer.*;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
+import org.json.simple.JSONArray;
 
 
 public class JMSBusinessService extends SiebelBusinessService {
@@ -38,7 +40,7 @@ public class JMSBusinessService extends SiebelBusinessService {
         }
 
         LOGGER.info("method = " + method);
-
+        LOGGER.info("inputs = " + inputs.toString());
         if (method.equals("Subscribe")) {
             if (this.consumer == null) {
                 this.consumer = createConsumer(inputs);
@@ -47,17 +49,25 @@ public class JMSBusinessService extends SiebelBusinessService {
             while (true) {
                 try {
                     final ConsumerRecords<String, String> consumerRecords = this.consumer.poll(500);
+
                     if (consumerRecords.count() > 0) {
+                        JSONArray ja = new JSONArray();
                         for(ConsumerRecord<String,String> record:consumerRecords){
-                            SiebelPropertySet msg = new SiebelPropertySet();
+                            /*SiebelPropertySet msg = new SiebelPropertySet();
                             msg.setValue(record.value());
                             msg.setProperty("Topic", record.topic());
                             msg.setProperty("Partition", String.valueOf(record.partition()));
                             msg.setProperty("Offset", String.valueOf(record.offset()));
                             msg.setProperty("Key", record.key());
-                            outputs.addChild(msg);
+                            outputs.addChild(msg);*/
+                            LinkedHashMap rec = new LinkedHashMap(2);
+                            rec.put("topic", record.topic());
+                            rec.put("partition", record.partition());
+                            rec.put("offset", record.offset());
+                            rec.put("key", record.key());
+                            ja.add(rec);
                         }
-                        outputs.setType("XMLHierarchy");
+                        outputs.setValue(ja.toJSONString());
                         break;
                     }
                 } catch (Exception e) {
