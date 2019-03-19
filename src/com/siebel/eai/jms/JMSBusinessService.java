@@ -68,12 +68,10 @@ public class JMSBusinessService extends SiebelBusinessService {
             final ProducerRecord<String, String> record = new ProducerRecord<>(topic, inputs.getProperty("Key"), inputs.getValue());
             try {
                 RecordMetadata metadata = this.producer.send(record).get();
-                outputs.setProperty("topic", metadata.topic());
-                outputs.setProperty("offset", String.valueOf(metadata.offset()));
-                outputs.setProperty("partition", String.valueOf(metadata.partition()));
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            } catch (ExecutionException e) {
+                outputs.setProperty("Topic", metadata.topic());
+                outputs.setProperty("Offset", String.valueOf(metadata.offset()));
+                outputs.setProperty("Partition", String.valueOf(metadata.partition()));
+            } catch (InterruptedException | ExecutionException e) {
                 e.printStackTrace();
             }
 
@@ -146,8 +144,7 @@ public class JMSBusinessService extends SiebelBusinessService {
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
 
-        final Producer<String, String> producer =  new KafkaProducer<String, String>(props);
-        return producer;
+        return new KafkaProducer(props);
     }
 
 }
