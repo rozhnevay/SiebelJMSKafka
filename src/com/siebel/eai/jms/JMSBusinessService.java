@@ -28,28 +28,33 @@ public class JMSBusinessService extends SiebelBusinessService {
     private Producer<String, String> producer;
 
     private static final Logger LOGGER = Logger.getLogger(JMSBusinessService.class.getName());
+    FileHandler fileHandler;
+
+
 
     public void doInvokeMethod(String method, SiebelPropertySet inputs, SiebelPropertySet outputs) throws SiebelBusinessServiceException {
 
         try {
-            FileHandler fileHandler  = new FileHandler("C:/Temp/MSG.log");
-            LOGGER.addHandler(fileHandler);
-            fileHandler.setFormatter(new SimpleFormatter());
+            if (fileHandler == null) {
+                fileHandler = new FileHandler("C:/Temp/MSG.log");
+                LOGGER.addHandler(fileHandler);
+                fileHandler.setFormatter(new SimpleFormatter());
+            }
         } catch (IOException e) {
             e.printStackTrace();
         }
 
         LOGGER.info("method = " + method);
-        LOGGER.info("inputs = " + inputs.toString());
+
         if (method.equals("Subscribe")) {
-            if (this.consumer == null) {
+            //if (this.consumer == null) {
                 this.consumer = createConsumer(inputs);
-            }
+            //}
 
             while (true) {
                 try {
                     final ConsumerRecords<String, String> consumerRecords = this.consumer.poll(500);
-
+                    LOGGER.info("count = " + consumerRecords.count());
                     if (consumerRecords.count() > 0) {
                         JSONArray ja = new JSONArray();
                         for(ConsumerRecord<String,String> record:consumerRecords){
@@ -61,6 +66,7 @@ public class JMSBusinessService extends SiebelBusinessService {
                             msg.setProperty("Key", record.key());
                             outputs.addChild(msg);*/
                             LinkedHashMap rec = new LinkedHashMap(2);
+                            rec.put("value", record.value());
                             rec.put("topic", record.topic());
                             rec.put("partition", record.partition());
                             rec.put("offset", record.offset());
@@ -103,7 +109,9 @@ public class JMSBusinessService extends SiebelBusinessService {
             this.consumer.commitAsync();
         } else if (method.equals("Rollback")) {
             throw new SiebelBusinessServiceException("ROLLBACK", "Error on processing records on Siebel side!");
-        } else if (method.equals("CloseConnection")) {}
+        } else if (method.equals("CloseConnection")) {
+            this.consumer.close();
+        }
         else {
             throw new SiebelBusinessServiceException("NO_SUCH_METHOD", "No such method: \"" + method + "\"");
         }
@@ -148,6 +156,7 @@ public class JMSBusinessService extends SiebelBusinessService {
         props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+        props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 100);
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
 
         final Consumer<String, String> consumer = new KafkaConsumer<>(props);
