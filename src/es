@@ -1,0 +1,78 @@
+function ProcessRecords(Inputs, Outputs) {
+	try {
+		//TheApplication().TraceOn("c:\\temp\\trace.txt", "Allocation", "All");
+		//TheApplication().Trace("first");
+		var oBC : BusComp = TheApplication().GetBusObject("SBRF Kafka Message").GetBusComp("SBRF Kafka Message");
+
+		var oInpPS	: PropertySet = TheApplication().NewPropertySet();
+		var oOutPS	: PropertySet = TheApplication().NewPropertySet();
+		var oBS		: Service = TheApplication().GetService("Workflow Process Manager");
+
+		var oInpValPS	: PropertySet = Inputs.Copy();
+		var records = eval(oInpValPS.GetValue());
+		/*
+		var oXMLInpPs	: PropertySet = TheApplication().NewPropertySet();
+		var oXMLOutPs	: PropertySet = TheApplication().NewPropertySet();
+		var oXMLtoPSsvc	: Service = TheApplication().GetService("XML Hierarchy Converter");
+
+		var oRecordsPS	: PropertySet = Inputs.Copy();*/
+		/*
+		oXMLInpPs.SetValue(Inputs.GetValue());
+		oXMLtoPSsvc.InvokeMethod("XMLDocToXMLHier", oXMLInpPs, oXMLOutPs);
+
+
+		TheApplication().Trace("child = " + oXMLOutPs.GetChildCount());
+		oRecordsPS = oXMLOutPs.GetChild(0).GetChild(0);*/
+		/*var records = eval(Inputs.GetValue());*/
+
+		/*
+		var ps : PropertySet = Inputs.Copy();
+		var bs = TheApplication().GetService("EAI XML Write to File");
+		var op = TheApplication().NewPropertySet();
+		ps.SetProperty("FileName" , "C:\\Siebel\\16.0.0.0.0\\ses\\siebsrvr\\TEMP\\temp.xml");
+		bs.InvokeMethod("WritePropSet", ps, op);
+
+		*/
+
+		for (var i = 0; i < records.length; i++) {
+			with (oBC) {
+				ActivateField("Status");
+				//try {
+					//TheApplication().Trace("t = " + records[i].topic);
+					//TheApplication().Trace("p = " + records[i].partition);
+					//TheApplication().Trace("o = " + records[i].offset);
+					//TheApplication().Trace("k = " + records[i].key);
+					NewRecord(NewAfter);
+					SetFieldValue("Topic",		records[i].topic);
+					SetFieldValue("Partition",	records[i].partition);
+					SetFieldValue("Offset",		records[i].offset);
+					SetFieldValue("Key",		records[i].key);
+					SetFieldValue("Status",		"IN_PROGRESS");
+					WriteRecord();
+					//TheApplication().Trace("Write Success");
+				   	try {
+						oInpPS.SetProperty("ProcessName", "SBRF CC Kafka Hadling Process");
+						oInpPS.SetValue(records[i].value);
+						oBS.InvokeMethod("RunProcess", oInpPS, oOutPS);
+						oBC.SetFieldValue("Status", "SUCCESS");
+						oBC.WriteRecord();
+					} catch (e) {
+						oBC.SetFieldValue("Status", "ERROR");
+						oBC.WriteRecord();
+					}
+					//TheApplication().Trace("Process Success");
+				//} catch (e) {
+					/* Record have been already processed */
+				//}
+			}
+		}
+	} catch (e) {
+		throw e;
+	} finally {
+		records = null;
+		oBC = null;
+		oBS = null;
+		oInpPS = oOutPS = oInpValPS = null;
+		//TheApplication().TraceOff();
+	}
+}

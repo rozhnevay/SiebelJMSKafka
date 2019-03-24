@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Properties;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.logging.FileHandler;
 import java.util.logging.Logger;
@@ -30,7 +31,19 @@ public class JMSBusinessService extends SiebelBusinessService {
     private static final Logger LOGGER = Logger.getLogger(JMSBusinessService.class.getName());
     FileHandler fileHandler;
 
+    public class PollRecrods implements Callable<Double> {
 
+        private Consumer<String, String> consumer;
+
+        public PollRecrods(Consumer<String, String> consumer) {
+
+        }
+
+        @Override
+        public Double call() throws Exception {
+            return IntStream.of(numbers).average().orElse(0d);
+        }
+    }
 
     public void doInvokeMethod(String method, SiebelPropertySet inputs, SiebelPropertySet outputs) throws SiebelBusinessServiceException {
 
@@ -44,7 +57,7 @@ public class JMSBusinessService extends SiebelBusinessService {
             e.printStackTrace();
         }
 
-        LOGGER.info("method = " + method);
+        //LOGGER.info("method = " + method);
 
         if (method.equals("Subscribe")) {
             this.consumer = createConsumer(inputs);
@@ -52,7 +65,7 @@ public class JMSBusinessService extends SiebelBusinessService {
             while (true) {
                 try {
                     final ConsumerRecords<String, String> consumerRecords = this.consumer.poll(500);
-                    LOGGER.info("count = " + consumerRecords.count());
+                    /*LOGGER.info("count = " + consumerRecords.count());
                     if (consumerRecords.count() > 0) {
                         JSONArray ja = new JSONArray();
                         for(ConsumerRecord<String,String> record:consumerRecords){
@@ -66,7 +79,18 @@ public class JMSBusinessService extends SiebelBusinessService {
                         }
                         outputs.setValue(ja.toJSONString());
                         break;
+                    }*/
+                    if (consumerRecords.count() > 0) {
+                        LOGGER.info("count = " + consumerRecords.count());
+                        for (ConsumerRecord<String, String> record : consumerRecords) {
+                            LOGGER.info("val = " + record.value());
+                            outputs.setProperty("Topic", record.topic());
+                            outputs.setProperty("Partition", String.valueOf(record.partition()));
+                            outputs.setProperty("Offset", String.valueOf(record.offset()));
+                            outputs.setValue(record.value());
+                        }
                     }
+
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
@@ -97,7 +121,7 @@ public class JMSBusinessService extends SiebelBusinessService {
             producer.flush();
             producer.close();
         } else if (method.equals("Commit")) {
-            this.consumer.commitAsync();
+            this.consumer.commitSync();
         } else if (method.equals("Rollback")) {
             throw new SiebelBusinessServiceException("ROLLBACK", "Error on processing records on Siebel side!");
         } else if (method.equals("CloseConnection")) {
@@ -147,7 +171,8 @@ public class JMSBusinessService extends SiebelBusinessService {
         props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
-        props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 100);
+        //props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 100);
+        props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 1);
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
 
         final Consumer<String, String> consumer = new KafkaConsumer<>(props);
