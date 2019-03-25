@@ -8,12 +8,12 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Properties;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-import java.util.logging.FileHandler;
-import java.util.logging.Logger;
-import java.util.logging.SimpleFormatter;
-
+import java.util.concurrent.*;
+//import java.util.logging.FileHandler;
+//import java.util.logging.Logger;
+//import java.util.logging.SimpleFormatter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 import org.apache.kafka.clients.consumer.*;
@@ -21,65 +21,77 @@ import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.producer.*;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
-import org.json.simple.JSONArray;
+
+
 
 
 public class JMSBusinessService extends SiebelBusinessService {
     private Consumer<String, String> consumer;
     private Producer<String, String> producer;
 
-    private static final Logger LOGGER = Logger.getLogger(JMSBusinessService.class.getName());
-    FileHandler fileHandler;
+    private Logger LOGGER = LoggerFactory.getLogger(JMSBusinessService.class);
+    //FileHandler fileHandler;
 
-    public class PollRecrods implements Callable<Double> {
-
-        private Consumer<String, String> consumer;
-
-        public PollRecrods(Consumer<String, String> consumer) {
-
-        }
-
-        @Override
-        public Double call() throws Exception {
-            return IntStream.of(numbers).average().orElse(0d);
-        }
+    public JMSBusinessService() {
+        LOGGER = LoggerFactory.getLogger(JMSBusinessService.class);
     }
-
     public void doInvokeMethod(String method, SiebelPropertySet inputs, SiebelPropertySet outputs) throws SiebelBusinessServiceException {
 
-        try {
-            if (fileHandler == null) {
-                fileHandler = new FileHandler("C:/Temp/MSG.log");
-                LOGGER.addHandler(fileHandler);
-                fileHandler.setFormatter(new SimpleFormatter());
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-
-        //LOGGER.info("method = " + method);
+        LOGGER.info("method = " + method);
 
         if (method.equals("Subscribe")) {
-            this.consumer = createConsumer(inputs);
+
+            int wakeupCount = 0;
+            int maxRetries = 15;
+
 
             while (true) {
                 try {
-                    final ConsumerRecords<String, String> consumerRecords = this.consumer.poll(500);
-                    /*LOGGER.info("count = " + consumerRecords.count());
-                    if (consumerRecords.count() > 0) {
-                        JSONArray ja = new JSONArray();
-                        for(ConsumerRecord<String,String> record:consumerRecords){
-                            LinkedHashMap rec = new LinkedHashMap(2);
-                            rec.put("value", record.value());
-                            rec.put("topic", record.topic());
-                            rec.put("partition", record.partition());
-                            rec.put("offset", record.offset());
-                            rec.put("key", record.key());
-                            ja.add(rec);
+                    try {
+                        if (this.consumer == null) {
+                            this.consumer = createConsumer(inputs);
                         }
-                        outputs.setValue(ja.toJSONString());
+                        ExecutorService executorService = Executors.newSingleThreadExecutor();
+                        Future<ConsumerRecord> result = executorService.submit(new PollRecords(this.consumer, LOGGER));
+                        ConsumerRecord<String,String> record = null;
+
+                        record = result.get(1, TimeUnit.SECONDS);
+
+                        if (outputs != null) {
+                            outputs.setProperty("Topic", record.topic());
+                            outputs.setProperty("Partition", String.valueOf(record.partition()));
+                            outputs.setProperty("Offset", String.valueOf(record.offset()));
+                            outputs.setValue(record.value());
+                            this.consumer.commitAsync();
+                            break;
+                        }
+
+                    } catch (TimeoutException e) {
+                        this.consumer.wakeup();
+                        wakeupCount++;
+                        if (wakeupCount >= maxRetries) {
+                            throw new SiebelBusinessServiceException("ERROR", "Cannot connect to Kafka Broker");
+                        }
+                    }
+
+
+                    /*
+                    final ConsumerRecords<String, String> consumerRecords = this.consumer.poll(500);
+                    LOGGER.info("count = " + consumerRecords.count());
+                    if (consumerRecords.count() > 0) {
+                        //JSONArray ja = new JSONArray();
+                        for(ConsumerRecord<String,String> record:consumerRecords){
+                            //LinkedHashMap rec = new LinkedHashMap(2);
+                            outputs.setProperty("Topic", record.topic());
+                            outputs.setProperty("Partition", String.valueOf(record.partition()));
+                            outputs.setProperty("Offset", String.valueOf(record.offset()));
+                            outputs.setValue(record.value());
+
+                        }
+                        //outputs.setValue(ja.toJSONString());
                         break;
                     }*/
+                    /*
                     if (consumerRecords.count() > 0) {
                         LOGGER.info("count = " + consumerRecords.count());
                         for (ConsumerRecord<String, String> record : consumerRecords) {
@@ -89,15 +101,18 @@ public class JMSBusinessService extends SiebelBusinessService {
                             outputs.setProperty("Offset", String.valueOf(record.offset()));
                             outputs.setValue(record.value());
                         }
-                    }
+                    }*/
 
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
 
             }
+            LOGGER.info("outputs2: " + outputs.toString());
         } else if (method.equals("Publish")) {
-            this.producer = createProducer(inputs);
+            if (this.producer == null) {
+                this.producer = createProducer(inputs);
+            }
             String topic = inputs.getProperty("SendTopic");
 
             if (topic == null || topic.isEmpty()) {
@@ -117,15 +132,16 @@ public class JMSBusinessService extends SiebelBusinessService {
             } catch (InterruptedException | ExecutionException e) {
                 e.printStackTrace();
             }
-
+            /*
             producer.flush();
             producer.close();
+            */
         } else if (method.equals("Commit")) {
-            this.consumer.commitSync();
+            //this.consumer.commitSync();
         } else if (method.equals("Rollback")) {
             throw new SiebelBusinessServiceException("ROLLBACK", "Error on processing records on Siebel side!");
         } else if (method.equals("CloseConnection")) {
-            this.consumer.close();
+            //this.consumer.close();
         }
         else {
             throw new SiebelBusinessServiceException("NO_SUCH_METHOD", "No such method: \"" + method + "\"");
@@ -190,6 +206,8 @@ public class JMSBusinessService extends SiebelBusinessService {
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, btServers);
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+        props.put(ProducerConfig.ACKS_CONFIG, "1");
+        props.put(ProducerConfig.RETRIES_CONFIG, "15");
 
         return new KafkaProducer(props);
     }
