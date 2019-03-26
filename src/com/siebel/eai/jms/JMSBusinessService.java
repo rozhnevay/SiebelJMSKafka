@@ -5,6 +5,8 @@ import com.siebel.eai.SiebelBusinessService;
 import com.siebel.eai.SiebelBusinessServiceException;
 
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Properties;
@@ -29,35 +31,42 @@ public class JMSBusinessService extends SiebelBusinessService {
     private Consumer<String, String> consumer;
     private Producer<String, String> producer;
 
-    private Logger LOGGER = LoggerFactory.getLogger(JMSBusinessService.class);
+    private static Logger Logger = LoggerFactory.getLogger(JMSBusinessService.class);
+    private ExecutorService executorService;
+    final static int pollTimeout = 1000;
+    final static int threadTimeout = 5000;
+
+    final static int heartBeatInterval = 3000;
+    final static int sessionTimeout = 9000;
     //FileHandler fileHandler;
 
     public JMSBusinessService() {
-        LOGGER = LoggerFactory.getLogger(JMSBusinessService.class);
+        Logger.warn("{MAIN} Constructor START");
+        Logger = LoggerFactory.getLogger(JMSBusinessService.class);
+        this.executorService = Executors.newSingleThreadExecutor();
     }
-    public void doInvokeMethod(String method, SiebelPropertySet inputs, SiebelPropertySet outputs) throws SiebelBusinessServiceException {
 
-        LOGGER.info("method = " + method);
+    public void doInvokeMethod(String method, SiebelPropertySet inputs, SiebelPropertySet outputs) throws SiebelBusinessServiceException {
+        Logger.warn("{MAIN} doInvokeMethod START [method = " + method + "] [this.id = " + this.hashCode() + "]");
+        if (Thread.currentThread().getContextClassLoader() == null) {
+            Thread.currentThread().setContextClassLoader(JMSBusinessService.class.getClassLoader());
+        }
 
         if (method.equals("Subscribe")) {
+            try {
+                int wakeupCount = 0;
+                int maxRetries = 15;
+                ConsumerRecord<String, String> record;
 
-            int wakeupCount = 0;
-            int maxRetries = 15;
-
-
-            while (true) {
-                try {
+                while (true) {
                     try {
                         if (this.consumer == null) {
-                            this.consumer = createConsumer(inputs);
+                            createConsumer(inputs);
                         }
-                        ExecutorService executorService = Executors.newSingleThreadExecutor();
-                        Future<ConsumerRecord> result = executorService.submit(new PollRecords(this.consumer, LOGGER));
-                        ConsumerRecord<String,String> record = null;
+                        Future<ConsumerRecord> result = this.executorService.submit(new PollRecords(this.consumer, pollTimeout, Logger));
 
-                        record = result.get(1, TimeUnit.SECONDS);
-
-                        if (outputs != null) {
+                        record = result.get(threadTimeout, TimeUnit.MILLISECONDS);
+                        if (record != null) {
                             outputs.setProperty("Topic", record.topic());
                             outputs.setProperty("Partition", String.valueOf(record.partition()));
                             outputs.setProperty("Offset", String.valueOf(record.offset()));
@@ -67,48 +76,35 @@ public class JMSBusinessService extends SiebelBusinessService {
                         }
 
                     } catch (TimeoutException e) {
+                        Logger.warn("{MAIN} TimeoutException START [wakeupCount = " + wakeupCount +"]");
                         this.consumer.wakeup();
+                        if (this.consumer != null) {
+                            this.consumer = null;
+                        }
+                        throw new SiebelBusinessServiceException("ERROR", e.getMessage());
+                        /*if (this.consumer != null) {
+                            this.consumer = null;
+                        }
+
                         wakeupCount++;
                         if (wakeupCount >= maxRetries) {
-                            throw new SiebelBusinessServiceException("ERROR", "Cannot connect to Kafka Broker");
-                        }
+                            Logger.warn("{MAIN} TimeoutException Max Timeout");
+                            throw new SiebelBusinessServiceException("ERROR", "Cannot connect to Kafka Broker!");
+                        }*/
+                        //Logger.warn("{MAIN} TimeoutException FINISH");
+                    } catch (InterruptedException e) {
+                        Logger.error("{MAIN} InterruptedException", e);
+                        throw new SiebelBusinessServiceException("ERROR", e.getMessage());
+                    } catch (ExecutionException e) {
+                        Logger.error("{MAIN} ExecutionException", e);
+                        throw new SiebelBusinessServiceException("ERROR", e.getMessage());
                     }
 
-
-                    /*
-                    final ConsumerRecords<String, String> consumerRecords = this.consumer.poll(500);
-                    LOGGER.info("count = " + consumerRecords.count());
-                    if (consumerRecords.count() > 0) {
-                        //JSONArray ja = new JSONArray();
-                        for(ConsumerRecord<String,String> record:consumerRecords){
-                            //LinkedHashMap rec = new LinkedHashMap(2);
-                            outputs.setProperty("Topic", record.topic());
-                            outputs.setProperty("Partition", String.valueOf(record.partition()));
-                            outputs.setProperty("Offset", String.valueOf(record.offset()));
-                            outputs.setValue(record.value());
-
-                        }
-                        //outputs.setValue(ja.toJSONString());
-                        break;
-                    }*/
-                    /*
-                    if (consumerRecords.count() > 0) {
-                        LOGGER.info("count = " + consumerRecords.count());
-                        for (ConsumerRecord<String, String> record : consumerRecords) {
-                            LOGGER.info("val = " + record.value());
-                            outputs.setProperty("Topic", record.topic());
-                            outputs.setProperty("Partition", String.valueOf(record.partition()));
-                            outputs.setProperty("Offset", String.valueOf(record.offset()));
-                            outputs.setValue(record.value());
-                        }
-                    }*/
-
-                } catch (Exception e) {
-                    e.printStackTrace();
                 }
-
+            } catch (Exception e) {
+                Logger.error("{MAIN} Exception", e);
+                throw new SiebelBusinessServiceException("ERROR", e.getMessage());
             }
-            LOGGER.info("outputs2: " + outputs.toString());
         } else if (method.equals("Publish")) {
             if (this.producer == null) {
                 this.producer = createProducer(inputs);
@@ -130,12 +126,15 @@ public class JMSBusinessService extends SiebelBusinessService {
                 outputs.setProperty("Offset", String.valueOf(metadata.offset()));
                 outputs.setProperty("Partition", String.valueOf(metadata.partition()));
             } catch (InterruptedException | ExecutionException e) {
-                e.printStackTrace();
+                Logger.warn(e.getMessage());
+                try {
+                    this.producer.close();
+                } catch (Exception ex){} finally {
+                    this.producer = null;
+                }
+
+                throw new SiebelBusinessServiceException("ERROR", e.getMessage());
             }
-            /*
-            producer.flush();
-            producer.close();
-            */
         } else if (method.equals("Commit")) {
             //this.consumer.commitSync();
         } else if (method.equals("Rollback")) {
@@ -149,13 +148,7 @@ public class JMSBusinessService extends SiebelBusinessService {
     }
 
     public void finalize() {
-        if (this.consumer != null) {
-            try {
-                this.consumer.close();
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
+        destroy();
     }
 
     public void destroy() {
@@ -164,11 +157,14 @@ public class JMSBusinessService extends SiebelBusinessService {
                 this.consumer.close();
             } catch (Exception e) {
                 e.printStackTrace();
+            } finally {
+                this.consumer = null;
             }
         }
     }
 
-    private static Consumer<String, String> createConsumer(SiebelPropertySet inputs)  throws SiebelBusinessServiceException {
+    private void createConsumer(SiebelPropertySet inputs)  throws SiebelBusinessServiceException {
+        Logger.warn("{MAIN - createConsumer} doInvokeMethod START");
         final Properties props = new Properties();
         final String btServers  = inputs.getProperty("ConnectionFactory");
         final String groupId    = inputs.getProperty("SubscriberIdentifier");
@@ -187,13 +183,14 @@ public class JMSBusinessService extends SiebelBusinessService {
         props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
-        //props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 100);
         props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 1);
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+        props.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, heartBeatInterval);
+        props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, sessionTimeout);
 
-        final Consumer<String, String> consumer = new KafkaConsumer<>(props);
-        consumer.subscribe(Collections.singletonList(topic));
-        return consumer;
+        this.consumer = new KafkaConsumer<>(props);
+        this.consumer.subscribe(Collections.singletonList(topic));
+        Logger.warn("{MAIN - createConsumer} doInvokeMethod FINISH [consumer = " + this.consumer.hashCode() + "]");
     }
 
     private static Producer<String, String> createProducer(SiebelPropertySet inputs) throws SiebelBusinessServiceException {

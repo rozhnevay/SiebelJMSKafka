@@ -11,30 +11,38 @@ import org.slf4j.Logger;
 public class PollRecords implements Callable<ConsumerRecord> {
 
     private Consumer<String, String> consumer;
-    Logger LOGGER;
+    private Logger Logger;
+    private Integer pollTimeout;
 
-    public PollRecords(Consumer<String, String> consumer, Logger LOGGER) {
+    public PollRecords(Consumer<String, String> consumer, Integer pollTimeout, Logger mainLogger) {
         this.consumer = consumer;
-        this.LOGGER = LOGGER;
-        LOGGER.info("Inside Poll this.consumer = " + this.consumer.hashCode());
+        this.Logger = mainLogger;
+        this.pollTimeout = pollTimeout;
+        Logger.warn("{Poll - Constructor} FINISH, [consumer = " + this.consumer.hashCode() + "]");
     }
 
     @Override
-    public ConsumerRecord call() throws Exception {
-
+    public ConsumerRecord call() {
+        Logger.warn("{Poll - call} START [consumer = " + this.consumer.hashCode() + "]");
         try {
-            LOGGER.info("Poll this.consumer = " + this.consumer.hashCode());
-            ConsumerRecords<String, String> consumerRecords = this.consumer.poll(500);
+            ConsumerRecords<String, String> consumerRecords = this.consumer.poll(1000);
             if (consumerRecords.count() > 0) {
                 for (ConsumerRecord<String, String> record : consumerRecords) {
                     return record;
                 }
             }
-            return null;
         } catch (WakeupException e){
-            LOGGER.info("Inside Poll Wakeup");
-            //this.consumer.close();
-            //LOGGER.info("Consumer Closed");
+            Logger.warn("{Poll - call Wakeup Exception} - START");
+            try {
+                this.consumer.close();
+                Logger.warn("{Poll - call Wakeup Exception} - Consumer CLOSED");
+            } catch (Exception ex) {}
+            finally {
+                this.consumer = null;
+            }
+            Logger.warn("{Poll Wakeup Exception} - FINISH");
+        } finally {
+            Logger.warn("{Poll - call} FINISH");
         }
         return null;
     }
