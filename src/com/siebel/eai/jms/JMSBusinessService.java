@@ -4,16 +4,9 @@ import com.siebel.data.SiebelPropertySet;
 import com.siebel.eai.SiebelBusinessService;
 import com.siebel.eai.SiebelBusinessServiceException;
 
-import java.io.IOException;
-import java.io.PrintWriter;
-import java.io.StringWriter;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.Properties;
 import java.util.concurrent.*;
-//import java.util.logging.FileHandler;
-//import java.util.logging.Logger;
-//import java.util.logging.SimpleFormatter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,8 +18,6 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 
 
-
-
 public class JMSBusinessService extends SiebelBusinessService {
     private Consumer<String, String> consumer;
     private Producer<String, String> producer;
@@ -36,26 +27,24 @@ public class JMSBusinessService extends SiebelBusinessService {
     final static int pollTimeout = 1000;
     final static int threadTimeout = 5000;
 
-    final static int heartBeatInterval = 3000;
-    final static int sessionTimeout = 9000;
+    final static int heartBeatInterval = 10000;
+    final static int sessionTimeout = 30000;
     //FileHandler fileHandler;
 
     public JMSBusinessService() {
-        Logger.warn("{MAIN} Constructor START");
+        Logger.info("{MAIN} Constructor START");
         Logger = LoggerFactory.getLogger(JMSBusinessService.class);
         this.executorService = Executors.newSingleThreadExecutor();
     }
 
     public void doInvokeMethod(String method, SiebelPropertySet inputs, SiebelPropertySet outputs) throws SiebelBusinessServiceException {
-        Logger.warn("{MAIN} doInvokeMethod START [method = " + method + "] [this.id = " + this.hashCode() + "]");
+        Logger.info("{MAIN} doInvokeMethod START [method = " + method + "]");
         if (Thread.currentThread().getContextClassLoader() == null) {
             Thread.currentThread().setContextClassLoader(JMSBusinessService.class.getClassLoader());
         }
 
         if (method.equals("Subscribe")) {
             try {
-                int wakeupCount = 0;
-                int maxRetries = 15;
                 ConsumerRecord<String, String> record;
 
                 while (true) {
@@ -76,22 +65,12 @@ public class JMSBusinessService extends SiebelBusinessService {
                         }
 
                     } catch (TimeoutException e) {
-                        Logger.warn("{MAIN} TimeoutException START [wakeupCount = " + wakeupCount +"]");
                         this.consumer.wakeup();
                         if (this.consumer != null) {
                             this.consumer = null;
                         }
+                        Logger.error("{MAIN} Timeout Exception", e);
                         throw new SiebelBusinessServiceException("ERROR", e.getMessage());
-                        /*if (this.consumer != null) {
-                            this.consumer = null;
-                        }
-
-                        wakeupCount++;
-                        if (wakeupCount >= maxRetries) {
-                            Logger.warn("{MAIN} TimeoutException Max Timeout");
-                            throw new SiebelBusinessServiceException("ERROR", "Cannot connect to Kafka Broker!");
-                        }*/
-                        //Logger.warn("{MAIN} TimeoutException FINISH");
                     } catch (InterruptedException e) {
                         Logger.error("{MAIN} InterruptedException", e);
                         throw new SiebelBusinessServiceException("ERROR", e.getMessage());
@@ -107,12 +86,11 @@ public class JMSBusinessService extends SiebelBusinessService {
             }
         } else if (method.equals("Publish")) {
             if (this.producer == null) {
-                this.producer = createProducer(inputs);
+                createProducer(inputs);
             }
             String topic = inputs.getProperty("SendTopic");
 
             if (topic == null || topic.isEmpty()) {
-
                 topic = inputs.getProperty("Topic");
                 if (topic == null || topic.isEmpty()) {
                     throw new SiebelBusinessServiceException("MISSING_PARAMETER", "Missing parameter \"Topic\"");
@@ -126,7 +104,7 @@ public class JMSBusinessService extends SiebelBusinessService {
                 outputs.setProperty("Offset", String.valueOf(metadata.offset()));
                 outputs.setProperty("Partition", String.valueOf(metadata.partition()));
             } catch (InterruptedException | ExecutionException e) {
-                Logger.warn(e.getMessage());
+                Logger.error("{MAIN} Exception", e);
                 try {
                     this.producer.close();
                 } catch (Exception ex){} finally {
@@ -161,10 +139,19 @@ public class JMSBusinessService extends SiebelBusinessService {
                 this.consumer = null;
             }
         }
+        if (this.producer != null) {
+            try {
+                this.producer.close();
+            } catch (Exception e) {
+                e.printStackTrace();
+            } finally {
+                this.producer = null;
+            }
+        }
     }
 
     private void createConsumer(SiebelPropertySet inputs)  throws SiebelBusinessServiceException {
-        Logger.warn("{MAIN - createConsumer} doInvokeMethod START");
+        Logger.info("{MAIN - createConsumer} START");
         final Properties props = new Properties();
         final String btServers  = inputs.getProperty("ConnectionFactory");
         final String groupId    = inputs.getProperty("SubscriberIdentifier");
@@ -178,7 +165,6 @@ public class JMSBusinessService extends SiebelBusinessService {
         if (topic == null || topic.isEmpty()) {
             throw new SiebelBusinessServiceException("MISSING_PARAMETER", "Missing parameter \"Topic\"");
         }
-        //props.put(ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG, 102400);
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,  btServers);
         props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
@@ -187,13 +173,15 @@ public class JMSBusinessService extends SiebelBusinessService {
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         props.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, heartBeatInterval);
         props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, sessionTimeout);
+        props.put(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG, 31000);
 
         this.consumer = new KafkaConsumer<>(props);
         this.consumer.subscribe(Collections.singletonList(topic));
-        Logger.warn("{MAIN - createConsumer} doInvokeMethod FINISH [consumer = " + this.consumer.hashCode() + "]");
+        Logger.info("{MAIN - createConsumer} FINISH [consumer = " + this.consumer.hashCode() + "]");
     }
 
-    private static Producer<String, String> createProducer(SiebelPropertySet inputs) throws SiebelBusinessServiceException {
+    private void createProducer(SiebelPropertySet inputs) throws SiebelBusinessServiceException {
+        Logger.info("{MAIN - createProducer} START");
         Properties props = new Properties();
         final String btServers  = inputs.getProperty("ConnectionFactory");
         if (btServers == null || btServers.isEmpty()) {
@@ -206,7 +194,8 @@ public class JMSBusinessService extends SiebelBusinessService {
         props.put(ProducerConfig.ACKS_CONFIG, "1");
         props.put(ProducerConfig.RETRIES_CONFIG, "15");
 
-        return new KafkaProducer(props);
+        this.producer =  new KafkaProducer(props);
+        Logger.info("{MAIN - createProducer} FINISH [producer = " + this.producer.hashCode() + "]");
     }
 
 }

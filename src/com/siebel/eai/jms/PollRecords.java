@@ -18,12 +18,12 @@ public class PollRecords implements Callable<ConsumerRecord> {
         this.consumer = consumer;
         this.Logger = mainLogger;
         this.pollTimeout = pollTimeout;
-        Logger.warn("{Poll - Constructor} FINISH, [consumer = " + this.consumer.hashCode() + "]");
+        Logger.info("{Poll - Constructor} FINISH, [consumer = " + this.consumer.hashCode() + "]");
     }
 
     @Override
     public ConsumerRecord call() {
-        Logger.warn("{Poll - call} START [consumer = " + this.consumer.hashCode() + "]");
+        Logger.info("{Poll - call} START [consumer = " + this.consumer.hashCode() + "]");
         try {
             ConsumerRecords<String, String> consumerRecords = this.consumer.poll(1000);
             if (consumerRecords.count() > 0) {
@@ -32,17 +32,16 @@ public class PollRecords implements Callable<ConsumerRecord> {
                 }
             }
         } catch (WakeupException e){
-            Logger.warn("{Poll - call Wakeup Exception} - START");
+            Logger.info("{Poll - call Wakeup Exception} - START");
             try {
                 this.consumer.close();
-                Logger.warn("{Poll - call Wakeup Exception} - Consumer CLOSED");
+                Logger.info("{Poll - call Wakeup Exception} - Consumer CLOSED");
             } catch (Exception ex) {}
             finally {
                 this.consumer = null;
             }
-            Logger.warn("{Poll Wakeup Exception} - FINISH");
         } finally {
-            Logger.warn("{Poll - call} FINISH");
+
         }
         return null;
     }
